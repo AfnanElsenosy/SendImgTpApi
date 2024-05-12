@@ -11,7 +11,7 @@ public interface LuxandApiService {
     @Headers({
             "token: c4da8898b06a4c2b95d26c62caccd1fd",
             "Content-Type: application/octet-stream",
-            "Connection: close"
+
 
     })
     @Multipart
