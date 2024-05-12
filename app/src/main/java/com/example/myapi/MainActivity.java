@@ -1,12 +1,10 @@
 package com.example.myapi;
 
-import android.Manifest;
+import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.os.AsyncTask;
+import android.net.Uri;
 import android.os.Bundle;
-import android.provider.MediaStore;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.TextView;
@@ -14,18 +12,19 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 
-import java.io.ByteArrayOutputStream;
+import com.github.dhaval2404.imagepicker.ImagePicker;
+
+import java.io.File;
+import java.util.Objects;
 
 import okhttp3.MediaType;
+import okhttp3.MultipartBody;
 import okhttp3.RequestBody;
+import okhttp3.ResponseBody;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
-import retrofit2.Retrofit;
-import retrofit2.converter.gson.GsonConverterFactory;
 
 public class MainActivity extends AppCompatActivity{
     private static final int REQUEST_IMAGE_CAPTURE = 1;
@@ -42,123 +41,90 @@ public class MainActivity extends AppCompatActivity{
         captureButton = findViewById(R.id.captureButton);
         resultTextView = findViewById(R.id.resultTextView);
 
+
         captureButton.setOnClickListener(v -> {
-            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(MainActivity.this,
-                        new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST_CODE);
-
-            } else {
-                dispatchTakePictureIntent();
-
-            }
-            
+            ImagePicker.with(this)
+                    .compress(1024)
+                    .maxResultSize(1080, 1080)
+                    .start();
         });
 
-
-
-    }
-
-    private void dispatchTakePictureIntent() {
-        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-//        Log.i("TAG","2");
-        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
-            startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
-//            Log.i("TAG","3");
-        }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-//        Log.i("TAG","4");
-        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            Bundle extras = data.getExtras();
-            assert extras != null;
-            imageBitmap = (Bitmap) extras.get("data");
-//            Log.i("TAG","5");
-            if (imageBitmap != null) {
-                // Execute the image compression task
-                new ImageCompressionTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, imageBitmap);
-//                Log.i("TAG","6");
+        if (resultCode == Activity.RESULT_OK) {
+            //Image Uri will not be null for RESULT_OK
+            Uri uri = data.getData();
+            uploadFile(uri);
 
-            }
+        } else if (resultCode == ImagePicker.RESULT_ERROR) {
+            Toast.makeText(this, ImagePicker.getError(data), Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Task Cancelled", Toast.LENGTH_SHORT).show();
         }
     }
+    private void uploadFile(Uri fileUri) {
+        if (fileUri != null) {
+            // Convert Uri to File
+            File file = new File(Objects.requireNonNull(fileUri.getPath()));
+            if (file.exists()) {
+                // The file exists, proceed with upload
+                RequestBody requestFile =
+                        RequestBody.create(MediaType.parse("image/jpeg"), file);
+                // Create MultipartBody.Part
+                MultipartBody.Part body = MultipartBody.Part.createFormData("picture", file.getName(), requestFile);
+                // Create description RequestBody (if needed)
+                RequestBody description =
+                        RequestBody.create(MediaType.parse("text/plain"), "Image description");
 
-
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                dispatchTakePictureIntent();
-//                Log.i("TAG","8");
-
-            } else {
-//                Log.i("TAG","9");
-
-                Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-    public class ImageCompressionTask extends AsyncTask<Bitmap, Void, byte[]> {
-
-        @Override
-        protected byte[] doInBackground(Bitmap... bitmaps) {
-            // Compress the bitmap to a byte array in the background
-            Bitmap bitmap = bitmaps[0];
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, baos);
-            return baos.toByteArray();
-        }
-
-        @Override
-        protected void onPostExecute(byte[] imageData) {
-            // Create Retrofit instance
-            Retrofit retrofit = new Retrofit.Builder()
-                    .baseUrl("https://api.luxand.cloud/")
-                    .addConverterFactory(GsonConverterFactory.create())
-                    .build();
-//            Log.i("TAG","22");
-            // Create API service
-            LuxandApiService apiService = retrofit.create(LuxandApiService.class);
-
-            // Create RequestBody from byte array
-            RequestBody requestBody = RequestBody.create(MediaType.parse("image/jpeg"), imageData);
-
-            // Make API call
-            Call<ApiResponse> call = apiService.detectFace(requestBody);
-//            Log.i("TAG","33");
-            call.enqueue(new Callback<ApiResponse>() {
-                @Override
-                public void onResponse(@NonNull Call<ApiResponse> call, @NonNull Response<ApiResponse> response) {
-//                    Log.i("TAG","88");
-                    if (response.isSuccessful() && response.body() != null) {
-//                        Log.i("TAG","44");
-                        ApiResponse apiResponse = response.body();
-                        // Handle successful response
-                        Log.i("TAG","apiResponse"+apiResponse);
-                        Intent intent = new Intent(MainActivity.this, ResultActivity.class);
-                        intent.putExtra("imagePath", imageBitmap.isMutable()); // Pass the image path
-                        intent.putExtra("apiResponse", (CharSequence) apiResponse); // Pass the ApiResponse object
-                        startActivity(intent);
-                    } else {
-//                        Log.i("TAG","55");
-                        // Handle unsuccessful response
-                        Log.i("TAG","unsuccessful response");
+                // create upload service client
+                LuxandApiService service =
+                        ServiceGenerator.createService(LuxandApiService.class);
+                // finally, execute the request
+                Call<ResponseBody> call = service.detectFace(description, body);
+                call.enqueue(new Callback<ResponseBody>() {
+                    @Override
+                    public void onResponse(@NonNull Call<ResponseBody> call,
+                                           @NonNull Response<ResponseBody> response) {
+                        if (response.isSuccessful()) {
+                            // Update UI elements here
+                            runOnUiThread(() -> {
+                                ResponseBody apiResponse = response.body();
+                                Log.i("TAG", "apiResponse: " + apiResponse);
+                                // Update UI elements based on the response
+                                Log.v("Upload", "success");
+                            });
+                        }
                     }
-                }
 
-                @Override
-                public void onFailure(@NonNull Call<ApiResponse> call, @NonNull Throwable t) {
-                    // Handle network error
-                    Log.i("TAG",":"+t.getMessage());
+                    @Override
+                    public void onFailure(@NonNull Call<ResponseBody> call, @NonNull Throwable t) {
+                        runOnUiThread(() -> {
+                            // Handle failure, update UI elements or show error message
+                            Log.e("Upload error:", Objects.requireNonNull(t.getMessage()));
+                        });
+//
 
-                }
-            });
+                    }
+                });
+            } else {
+                // File does not exist
+                Log.e("TAG", "File does not exist: " + file.getPath());
+            }
+
+        } else {
+            // Uri is null
+            Log.e("TAG", "Uri is null");
         }
     }
+    private void goToResultActivity() {
+        ApiResponse apiResponse = new ApiResponse();
+        Intent intent = new Intent(this, ResultActivity.class);
+        startActivity(intent);
+    }
+
+
 
 }
